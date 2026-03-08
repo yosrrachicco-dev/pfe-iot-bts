@@ -1,41 +1,148 @@
-# PFE IoT Monorepo
+﻿# PFE IoT Monitoring Backend
 
-Complete PFE-ready stack with backend, frontend, firmware, and documentation.
+Simple backend for IoT monitoring using Express + MongoDB + MQTT.
 
-## Requirements
-- Docker Desktop only
+## Stack
+- Node.js + Express
+- MongoDB + Mongoose
+- MQTT (Eclipse Mosquitto)
+- JWT auth
 
-## Start Everything
+## Project Structure
+```txt
+backend/
+  src/
+    app.js
+    server.js
+    config/
+      env.js
+      mongo.js
+      mqtt.js
+    models/
+      User.js
+      Site.js
+      Device.js
+      Measurement.js
+      Alert.js
+    routes/
+      auth.routes.js
+      sites.routes.js
+      measurements.routes.js
+      alerts.routes.js
+    controllers/
+      auth.controller.js
+      sites.controller.js
+      measurements.controller.js
+      alerts.controller.js
+    services/
+      alertEngine.js
+      telemetryService.js
+    mqtt/
+      subscriber.js
+      handlers.js
+    middleware/
+      auth.js
+      errorHandler.js
+      requestLogger.js
+    utils/
+      logger.js
+  Dockerfile
+  mosquitto.conf
+  package.json
+```
+
+## Run (from monorepo root)
 ```bash
+cd ..
 docker compose up --build
 ```
 
-## Seed Demo Data
-```bash
-docker compose exec backend npm run seed
+## MQTT Topics
+- `telecom/{siteId}/{deviceUid}/telemetry`
+- `telecom/{siteId}/{deviceUid}/status`
+
+### Telemetry payload
+```json
+{"temperature":46.2,"humidity":81.5,"battery":10.8,"intrusion":1,"ts":"2026-03-01T12:00:00.000Z"}
 ```
 
-Seed creates:
-- admin user: `admin@pfe.local` / `admin123`
-- sample site: `site001`
-- sample device: `esp32-001`
+### Status payload
+```json
+{"online":true,"ts":"2026-03-01T12:00:10.000Z"}
+```
 
-## Demo Flow
-1. Open frontend and login.
-2. Open `site001` details.
-3. Publish MQTT samples from `docs/mqtt-demo.ps1` or `docs/mqtt-demo.sh`.
-4. Watch measurements/charts/alerts update.
-5. Resolve alerts in UI.
+## Publish sample messages
+Replace `SITE_ID` and `DEVICE_UID`.
 
-## URLs
-- Frontend: `http://localhost`
-- Backend API: `http://localhost:3000`
-- Backend health: `http://localhost:3000/health`
-- Mongo Express: `http://localhost:8081`
-- MQTT broker: `localhost:1883`
+```bash
+mosquitto_pub -h localhost -p 1883 -t telecom/SITE_ID/DEVICE_UID/telemetry -m '{"temperature":46.2,"humidity":81.5,"battery":10.8,"intrusion":1,"ts":"2026-03-01T12:00:00.000Z"}'
+```
 
-## Repository Layout
-- `backend/` Express + Mongo + MQTT backend
-- `frontend/` React + Vite + Nginx frontend
-- `firmware/` ESP32 Arduino sketch
-- `docs/` architecture, demo, report, Postman, MQTT scripts
+```bash
+mosquitto_pub -h localhost -p 1883 -t telecom/SITE_ID/DEVICE_UID/status -m '{"online":true,"ts":"2026-03-01T12:00:10.000Z"}'
+```
+
+## REST API
+
+### Auth
+Register:
+```bash
+curl -X POST http://localhost:3000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"secret123","role":"admin"}'
+```
+
+Login:
+```bash
+curl -X POST http://localhost:3000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"secret123"}'
+```
+
+Save token:
+```bash
+TOKEN="<JWT_TOKEN>"
+```
+
+### Sites CRUD
+Create site:
+```bash
+curl -X POST http://localhost:3000/api/sites \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Main Site","location":"Tunis"}'
+```
+
+Get sites:
+```bash
+curl http://localhost:3000/api/sites -H "Authorization: Bearer $TOKEN"
+```
+
+### Measurements
+```bash
+curl "http://localhost:3000/api/measurements?siteId=SITE_ID&deviceUid=device-001&from=2026-03-01T00:00:00.000Z&to=2026-03-01T23:59:59.999Z&limit=200" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### Alerts
+Get alerts:
+```bash
+curl "http://localhost:3000/api/alerts?siteId=SITE_ID&status=open" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Resolve alert:
+```bash
+curl -X POST http://localhost:3000/api/alerts/ALERT_ID/resolve \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+## Alert rules
+Thresholds (configurable in `.env`):
+- `TEMP_HIGH=45`
+- `HUMIDITY_HIGH=80`
+- `BATTERY_LOW=11`
+- `INTRUSION=1` (payload value)
+
+Deduplication rule:
+- if an **open** alert with same `type` and `deviceUid` already exists, no new one is created.
